@@ -2,38 +2,7 @@ use std::error::Error;
 use std::io::{self, BufRead, Read, Write};
 use std::net::{TcpListener, TcpStream};
 
-#[inline]
-fn print_char(c: &u8) {
-    print!(
-        "{}",
-        if c.is_ascii_graphic() && *c != 0x7f {
-            *c as char
-        } else {
-            '.'
-        }
-    );
-}
-
-fn hex_print(hex: &[u8], validlen: usize) {
-    if hex.len() > 65535 {
-        eprintln!("Array with more than 65535 elements isn't supported");
-        std::process::exit(1);
-    }
-    let mut bslice = [0_u8; 8];
-    for (index, cc) in hex[..validlen].iter().enumerate() {
-        bslice[index % 8] = *cc;
-        print!("{:02x} ", cc);
-        if index % 16 == 0 || index + 1 == validlen {
-            print!(" | ");
-            for pc in bslice.iter() {
-                print_char(pc);
-            }
-            println!();
-        } else if index % 8 == 0 {
-            print!("- ");
-        }
-    }
-}
+mod tools;
 
 fn respond(stream: &mut TcpStream, print_tcp: bool) -> Result<(), Box<dyn Error>> {
     let mut buf = [0_u8; 65535];
@@ -45,7 +14,7 @@ fn respond(stream: &mut TcpStream, print_tcp: bool) -> Result<(), Box<dyn Error>
                 println!("\n=====\n\nSocket Input:\n");
                 // Print hex if requested
                 if print_tcp {
-                    hex_print(&buf, n);
+                    tools::hex_print(&buf, n, true);
                     println!("\n=====\n");
                 }
 
@@ -54,14 +23,14 @@ fn respond(stream: &mut TcpStream, print_tcp: bool) -> Result<(), Box<dyn Error>
                     if *cc == 0x20_u8 {
                         print!(" ");
                     } else {
-                        print_char(cc);
+                        tools::print_char(cc);
                     }
                 }
 
                 println!("\n\n=====\n");
-                println!(
-                    "Please send the HTTP response back:\nType '?REVERT?' at new line to undo the last line.\nType '?END?' at new line to send.\n"
-                );
+                println!("Please send the data back:");
+                println!("Type '?UNDO?' at a new line to undo the last line,");
+                println!("Type '?SEND?' at a new line to send.\n");
 
                 // Response writer
                 let stdin = io::stdin();
@@ -74,13 +43,17 @@ fn respond(stream: &mut TcpStream, print_tcp: bool) -> Result<(), Box<dyn Error>
                     }
 
                     let trimmed = line.trim().to_string();
-                    if trimmed == "?END?" {
+                    if trimmed == "?SEND?" {
                         break;
-                    } else if trimmed == "?REVERT?" {
-                        lines.pop();
-                        println!("\nLine reverted. Now:");
-                        for line in &lines {
-                            println!("{}", line);
+                    } else if trimmed == "?UNDO?" {
+                        if !lines.is_empty() {
+                            lines.pop().unwrap();
+                            println!("\nLine reverted. Now:");
+                        } else {
+                            println!("\nNothing to revert! Now:");
+                        }
+                        for pline in &lines {
+                            println!("{}", pline);
                         }
                     } else {
                         lines.push(trimmed);
@@ -164,8 +137,7 @@ fn main() {
     // Ready
     println!("Listening at {}", addr);
     loop {
-        let (mut stream, sockaddr) = listener.accept().unwrap();
-        println!("[DEBUG] Socket address: {:?}", sockaddr);
+        let (mut stream, _) = listener.accept().unwrap();
         std::thread::spawn(move || {
             respond(&mut stream, param.1).unwrap();
         });
